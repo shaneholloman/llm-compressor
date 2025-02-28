@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from loguru import logger
+
 from llmcompressor.core.events import EventType
 from llmcompressor.core.helpers import log_model_info, should_log_model_info
 from llmcompressor.core.lifecycle import CompressionLifecycle
@@ -62,45 +64,6 @@ class CompressionSession:
         :return: the current state of the session
         """
         return self._lifecycle.state
-
-    def pre_initialize_structure(
-        self,
-        model: Any,
-        recipe: Union[str, List[str], Recipe, List[Recipe], None] = None,
-        recipe_stage: Union[str, List[str], None] = None,
-        recipe_args: Union[Dict[str, Any], List[Dict[str, Any]], None] = None,
-        **kwargs,
-    ) -> ModifiedState:
-        """
-        A method to pre-initialize the structure of the model for compression.
-        This will run the pre-initialize structure method for each modifier in the
-        session's lifecycle. This will also set the session's state to the
-        pre-initialized state. Takes care of cases when the model(s) structure
-        has been previously modified by a modifier.
-
-        :param model: the model to pre-initialize the structure for
-        :param recipe: the recipe to use for the compression, can be a path to a
-            recipe file, a raw recipe string, a recipe object, or a list
-            of recipe objects.
-        :param recipe_stage: the stage to use for the compression
-        :param recipe_args: the args to use for overriding the recipe defaults
-        :return: A ModifiedState instance holding the modified model and modifier_data
-            after pre-initializing the structure
-        """
-        mod_data = self._lifecycle.pre_initialize_structure(
-            model=model,
-            recipe=recipe,
-            recipe_stage=recipe_stage,
-            recipe_args=recipe_args,
-            **kwargs,
-        )
-
-        return ModifiedState(
-            model=self.state.model,
-            optimizer=None,
-            loss=None,
-            modifier_data=mod_data,
-        )
 
     def initialize(
         self,
@@ -198,19 +161,6 @@ class CompressionSession:
             modifier_data=mod_data,
         )
 
-    def apply(self, **kwargs):
-        """
-        Apply the recipe in one-shot manner. This will invoke the initialize
-        and then finalize methods for each modifier in the session's lifecycle.
-        This will also set the session's state to the finalized state.
-
-        :param kwargs: additional kwargs to pass to the lifecycle's initialize and
-            finalize methods
-        """
-        self.initialize(**kwargs)
-
-        return self.finalize(**kwargs)
-
     def event(
         self,
         event_type: EventType,
@@ -260,12 +210,16 @@ class CompressionSession:
         self.lifecycle.initialized_ = False
         self.lifecycle.finalized = False
 
-    def get_serialized_recipe(self) -> str:
+    def get_serialized_recipe(self) -> Optional[str]:
         """
         :return: serialized string of the current compiled recipe
         """
         recipe = self.lifecycle.recipe_container.compiled_recipe
-        return recipe.yaml()
+
+        if recipe is not None and hasattr(recipe, "yaml"):
+            return recipe.yaml()
+
+        logger.warning("Recipe not found in session - it may have been reset")
 
     def _log_model_info(self):
         # Log model level logs if cadence reached

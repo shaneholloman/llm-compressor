@@ -1,7 +1,7 @@
 from typing import Optional
 
 from compressed_tensors import CompressionFormat
-from compressed_tensors.config import SparsityCompressionConfig
+from compressed_tensors.config import SparsityStructure
 from compressed_tensors.quantization import QuantizationStrategy, QuantizationType
 from compressed_tensors.quantization.utils import (
     is_model_quantized,
@@ -16,10 +16,30 @@ def infer_quantization_format(
     model,
     quantization_format: Optional[str] = None,
     save_compressed: bool = False,
-    sparsity_config: Optional[SparsityCompressionConfig] = None,
+    sparsity_structure: Optional[str] = None,
 ) -> str:
     """
-    Infers a quantization format based on model state and compression args
+    Infers the quantization format for a model based on its state and provided
+    compression arguments.
+
+    The following table outlines the possible quantization and sparsity formats
+    along with their corresponding compressor formats:
+
+        +---------------+----------+----------------------+---------------------+
+        | Quantization  | Sparsity | Quant Compressor     | Sparsity Compressor |
+        |               |          | Format               | Format              |
+        +---------------+----------+----------------------+---------------------+
+        | W8A8 - int    | None     | int_quantized        | Dense               |
+        | W8A8 - float  | None     | float_quantized      | Dense               |
+        | W4A16 - int   | None     | pack_quantized       | Dense               |
+        | W8A16 - int   | None     | pack_quantized       | Dense               |
+        | W8A16 - float | None     | naive_quantized      | Dense               |
+        | W8A8 - int    | 2:4      | int_quantized        | Sparse24            |
+        | W8A8 - float  | 2:4      | float_quantized      | Sparse24            |
+        | W4A16 - int   | 2:4      | marlin_24            | Dense               |
+        | W8A16 - int   | 2:4      | marlin_24            | Dense               |
+        | W8A16 - float | 2:4      | naive_quantized      | Dense               |
+        +---------------+----------+----------------------+---------------------+
 
     :param model: model to check for quantization, if the model is not quantized no
         quantization format is returned
@@ -37,15 +57,15 @@ def infer_quantization_format(
     if save_compressed:
         weight_args, input_args = _get_unique_quant_args(model)
         is_24_structure = (
-            sparsity_config and sparsity_config.sparsity_structure == "2:4"
+            SparsityStructure(sparsity_structure) == SparsityStructure.TWO_FOUR
         )
         is_weight_only = len(input_args) == 0 and len(weight_args) > 0
 
         if is_weight_only:  # w4a16 and w8a16
-            is_valid_pack = (
-                len(weight_args) == 1
-                and weight_args[0].num_bits in [4, 8]
-                and weight_args[0].type == QuantizationType.INT.value
+            is_valid_pack = all(
+                weight_arg.num_bits in [4, 8]
+                and weight_arg.type == QuantizationType.INT.value
+                for weight_arg in weight_args
             )
             if not is_valid_pack:  # packing only valid for int4 and int 8
                 return CompressionFormat.naive_quantized

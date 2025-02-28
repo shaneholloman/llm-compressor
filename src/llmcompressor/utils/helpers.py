@@ -4,6 +4,7 @@ Common functions for interfacing with python primitives and directories/files.
 """
 
 import ast
+import contextlib
 import errno
 import fnmatch
 import glob
@@ -22,7 +23,10 @@ from typing import Any, Callable, Dict, Iterable, List, Tuple, Union
 from urllib.parse import urlparse
 
 import numpy
+import torch
+from compressed_tensors.quantization import disable_quantization, enable_quantization
 from loguru import logger
+from transformers import PreTrainedModel
 
 __all__ = [
     "ALL_TOKEN",
@@ -59,6 +63,11 @@ __all__ = [
     "is_package_available",
     "import_from_path",
     "getattr_chain",
+    "DisableKVCache",
+    "DisableQuantization",
+    "eval_context",
+    "calibration_forward_context",
+    "preserve_attr",
 ]
 
 
@@ -1041,3 +1050,91 @@ def getattr_chain(obj: Any, chain_str: str, *args, **kwargs) -> Any:
         res = getattr(res, attr_name)
 
     return res
+
+
+class DisableKVCache:
+    """
+    Temporarily disable the key-value cache for transformer models. Used to prevent
+    excess memory use in one-shot cases where the model only performs the prefill
+    phase and not the generation phase.
+
+    Example:
+    >>> model = AutoModel.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+    >>> input = torch.randint(0, 32, size=(1, 32))
+    >>> with DisableKVCache(model):
+    ...     output = model(input)
+    """
+
+    def __init__(self, model: PreTrainedModel):
+        if hasattr(model.config, "use_cache"):
+            self.config = model.config
+
+        # MllamaConfig
+        elif hasattr(model.config, "text_config") and hasattr(
+            model.config.text_config, "use_cache"
+        ):
+            self.config = model.config.text_config
+
+        # unknown config structure
+        else:
+            raise NotImplementedError(f"Cannot find `use_cache` for {model.config}")
+
+        self.restore_value = self.config.use_cache
+
+    def __enter__(self):
+        self.restore_value = self.config.use_cache
+        self.config.use_cache = False
+
+    def __exit__(self, _exc_type, _exc_val, _exc_tb):
+        self.config.use_cache = self.restore_value
+
+
+@contextlib.contextmanager
+def DisableQuantization(module: torch.nn.Module):
+    """
+    Disable quantization from QuantizationModifier
+    """
+    try:
+        module.apply(disable_quantization)
+        yield
+    finally:
+        module.apply(enable_quantization)
+
+
+@contextlib.contextmanager
+def eval_context(module: torch.nn.Module):
+    restore_value = module.training
+    try:
+        module.train(False)  # equivalent to eval()
+        yield
+
+    finally:
+        module.train(restore_value)
+
+
+@contextlib.contextmanager
+def calibration_forward_context(model: PreTrainedModel):
+    """
+    Context in which all calibration forward passes should occur.
+
+    - Remove gradient calculations
+    - Disable the KV cache
+    - Disable quantization during forward pass
+    - Disable train mode and enable eval mode
+    """
+    with (
+        torch.no_grad(),
+        DisableKVCache(model),
+        DisableQuantization(model),
+        eval_context(model),
+    ):
+        yield
+
+
+@contextlib.contextmanager
+def preserve_attr(base: object, attr: str):
+    value = getattr(base, attr)
+    try:
+        yield
+    finally:
+        setattr(base, attr, value)

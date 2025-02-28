@@ -5,13 +5,12 @@ from pathlib import Path
 import pytest
 from parameterized import parameterized_class
 
-from tests.testing_utils import parse_params, requires_gpu, requires_torch
+from tests.testing_utils import parse_params, requires_gpu
 
 CONFIGS_DIRECTORY = "tests/llmcompressor/transformers/finetune/finetune_generic"
 
 
 @pytest.mark.integration
-@requires_torch
 @requires_gpu
 @parameterized_class(parse_params(CONFIGS_DIRECTORY))
 class TestOneshotWithModifierObject(unittest.TestCase):
@@ -22,8 +21,8 @@ class TestOneshotWithModifierObject(unittest.TestCase):
         self.output = Path("./finetune_output")
 
     def test_oneshot_with_modifier_object(self):
+        from llmcompressor import oneshot
         from llmcompressor.modifiers.obcq.base import SparseGPTModifier
-        from llmcompressor.transformers import oneshot
 
         recipe_str = [
             SparseGPTModifier(sparsity=0.5, targets=[r"re:model.layers.\d+$"])

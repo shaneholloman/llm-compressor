@@ -34,14 +34,13 @@ Now, we will step though the code in the example. There are four steps:
 
 ### 1) Load Model
 
-Load the model using `SparseAutoModelForCausalLM`, which is a wrapper around `AutoModel` for handling quantized saving and loading. Note that `SparseAutoModel` is compatible with `accelerate` so you can load your model onto multiple GPUs if needed.
+Load the model using `AutoModelForCausalLM` for handling quantized saving and loading. 
 
 ```python
-from llmcompressor.transformers import SparseAutoModelForCausalLM
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
-model = SparseAutoModelForCausalLM.from_pretrained(
+model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, device_map="auto", torch_dtype="auto",
 )
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
@@ -87,7 +86,7 @@ In our case, we will apply the default GPTQ recipe for `int4` (which uses static
 > See the `Recipes` documentation for more information on making complex recipes
 
 ```python
-from llmcompressor.transformers import oneshot
+from llmcompressor import oneshot
 from llmcompressor.modifiers.quantization import GPTQModifier
 
 # Configure the quantization algorithm to run.

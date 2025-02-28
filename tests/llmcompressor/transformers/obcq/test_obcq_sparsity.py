@@ -5,13 +5,12 @@ import unittest
 import pytest
 from parameterized import parameterized_class
 
-from tests.testing_utils import parse_params, requires_gpu, requires_torch
+from tests.testing_utils import parse_params, requires_gpu
 
 CONFIGS_DIRECTORY = "tests/llmcompressor/transformers/obcq/obcq_configs/sparse"
 GPU_CONFIGS_DIRECTORY = "tests/llmcompressor/transformers/obcq/obcq_configs/sparse/gpu"
 
 
-@requires_torch
 @pytest.mark.integration
 @parameterized_class(parse_params(CONFIGS_DIRECTORY))
 class TestSparsities(unittest.TestCase):
@@ -27,11 +26,10 @@ class TestSparsities(unittest.TestCase):
         self.output = "./oneshot_output"
 
     def test_sparsities(self):
-        from llmcompressor.pytorch.model_load.helpers import get_session_model
+        from llmcompressor import oneshot
         from llmcompressor.pytorch.utils.helpers import tensor_sparsity
-        from llmcompressor.transformers import oneshot
 
-        oneshot(
+        model = oneshot(
             model=self.model,
             dataset=self.dataset,
             oneshot_device=self.device,
@@ -42,8 +40,6 @@ class TestSparsities(unittest.TestCase):
             clear_sparse_session=False,
             output_dir=self.output,
         )
-
-        model = get_session_model()
 
         layer_1_sparse = tensor_sparsity(model.model.layers[1].self_attn.k_proj.weight)
         assert math.isclose(layer_1_sparse.item(), self.sparsity, rel_tol=1e-4)
@@ -59,7 +55,6 @@ class TestSparsities(unittest.TestCase):
 
 # TODO: @Satrat and @dsikka, revisit if we want these nightly or weekly
 @requires_gpu
-@requires_torch
 @pytest.mark.integration
 @parameterized_class(parse_params(GPU_CONFIGS_DIRECTORY))
 class TestSparsitiesGPU(unittest.TestCase):
@@ -71,21 +66,19 @@ class TestSparsitiesGPU(unittest.TestCase):
 
     def setUp(self):
         import torch
-
-        from llmcompressor.transformers import SparseAutoModelForCausalLM
+        from transformers import AutoModelForCausalLM
 
         self.output = "./oneshot_output"
 
-        self.model = SparseAutoModelForCausalLM.from_pretrained(
+        self.model = AutoModelForCausalLM.from_pretrained(
             self.model, device_map=self.device, torch_dtype=torch.bfloat16
         )
 
     def test_sparsities_gpu(self):
-        from llmcompressor.pytorch.model_load.helpers import get_session_model
+        from llmcompressor import oneshot
         from llmcompressor.pytorch.utils.helpers import tensor_sparsity
-        from llmcompressor.transformers import oneshot
 
-        oneshot(
+        model = oneshot(
             model=self.model,
             dataset=self.dataset,
             oneshot_device=self.device,
@@ -96,10 +89,7 @@ class TestSparsitiesGPU(unittest.TestCase):
             clear_sparse_session=False,
             output_dir=self.output,
             precision="bfloat16",
-            bf16=True,
         )
-
-        model = get_session_model()
 
         layer_1_sparse = tensor_sparsity(model.model.layers[1].self_attn.k_proj.weight)
         assert math.isclose(layer_1_sparse.item(), self.sparsity, rel_tol=1e-4)

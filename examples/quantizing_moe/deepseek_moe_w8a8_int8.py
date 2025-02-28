@@ -1,10 +1,14 @@
 import torch
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from llmcompressor import oneshot
 from llmcompressor.modifiers.quantization import GPTQModifier
-from llmcompressor.transformers import SparseAutoModelForCausalLM, oneshot
 from llmcompressor.transformers.compression.helpers import calculate_offload_device_map
+
+# NOTE: transformers 4.49.0 has an attribute error with DeepSeek.
+# Please consider either downgrading your transformers version to a
+# previous version or upgrading to a version where this bug is fixed
 
 # select a Mixture of Experts model for quantization
 MODEL_ID = "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
@@ -19,7 +23,7 @@ device_map = calculate_offload_device_map(
     trust_remote_code=True,
 )
 
-model = SparseAutoModelForCausalLM.from_pretrained(
+model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, device_map=device_map, torch_dtype=torch.bfloat16, trust_remote_code=True
 )
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
@@ -81,10 +85,10 @@ oneshot(
     recipe=recipe,
     max_seq_length=MAX_SEQUENCE_LENGTH,
     num_calibration_samples=NUM_CALIBRATION_SAMPLES,
+    trust_remote_code_model=True,
     save_compressed=True,
     output_dir=SAVE_DIR,
 )
-
 
 print("========== SAMPLE GENERATION ==============")
 SAMPLE_INPUT = ["I love quantization because"]

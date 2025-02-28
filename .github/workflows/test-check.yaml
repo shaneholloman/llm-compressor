@@ -1,14 +1,6 @@
-name: Test Checks
+name: Test Checks (Base/PyTorch)
 on:
   push:
-    branches:
-      - main
-      - 'release/*'
-  pull_request:
-    branches:
-      - main
-      - 'release/*'
-    types: [opened, synchronize]
 
 env:
   CADENCE: "commit"
@@ -19,12 +11,13 @@ env:
   CLEARML_API_SECRET_KEY: ${{ secrets.CLEARML_API_SECRET_KEY }}
 
 jobs:
+
   base-tests:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - uses: actions/checkout@v4
       - name: "⚙️ Install dependencies"
         run: pip3 install -U pip setuptools && pip3 install .[dev]
@@ -40,6 +33,7 @@ jobs:
         run: rm -r compressed-tensors/
       - name: "🔬 Running base tests"
         run: make test
+
   pytorch-tests:
     runs-on: ubuntu-22.04
     steps:
@@ -62,12 +56,13 @@ jobs:
       - name: "🔬 Running pytorch tests"
         run: |
           pytest -v tests/llmcompressor/pytorch
+
   compat-pytorch-1_9-pytorch-tests:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.10'
       - uses: actions/checkout@v4
       - name: "⚙️ Install dependencies"
         run: pip3 install -U pip setuptools && pip3 install .[dev]
@@ -84,48 +79,3 @@ jobs:
       - name: "🔬 Running pytorch tests"
         run: |
           pytest -v tests/llmcompressor/pytorch
-  transformers-tests:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - uses: actions/checkout@v4
-      - name: "⚙️ Install dependencies"
-        run: pip3 install -U pip setuptools && pip3 install .[dev]
-      - uses: actions/checkout@v4
-        with:
-          repository: "neuralmagic/compressed-tensors"
-          path: "compressed-tensors"
-      - name: "⚙️ Install compressed-tensors dependencies"
-        id: install
-        run: |
-          pip3 uninstall -y compressed-tensors compressed-tensors-nightly
-          pip3 install ./compressed-tensors/
-      - name: "Clean compressed-tensors directory"
-        run: rm -r compressed-tensors/
-      - name: "🔬 Running transformers tests"
-        if: (success() || failure()) && steps.install.outcome == 'success'
-        run: |
-          pytest -v tests/llmcompressor/transformers/compression
-      - name: Run Finetune Tests
-        if: (success() || failure()) && steps.install.outcome == 'success'
-        run: |
-          pytest -v tests/llmcompressor/transformers/finetune -m unit
-      - name: Running GPTQ Tests
-        if: (success() || failure()) && steps.install.outcome == 'success'
-        run: |
-          pytest -v tests/llmcompressor/transformers/gptq
-      - name: Running ONESHOT Tests
-        if: (success() || failure()) && steps.install.outcome == 'success'
-        run: |
-          pytest -v tests/llmcompressor/transformers/oneshot
-      - name: Running Sparsification Tests
-        if: (success() || failure()) && steps.install.outcome == 'success'
-        run: |
-          pytest tests/llmcompressor/transformers/sparsification -v
-          pytest tests/llmcompressor/transformers/test_clear_ml.py -v
-      - name: Running OBCQ Tests
-        if: (success() || failure()) && steps.install.outcome == 'success'
-        run: |
-          pytest -v tests/llmcompressor/transformers/obcq

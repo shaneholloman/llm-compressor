@@ -9,7 +9,7 @@
 **✨ Read the announcement blog [here](https://neuralmagic.com/blog/llm-compressor-is-here-faster-inference-with-vllm/)! ✨**
 
 <p align="center">
-   <img alt="LLM Compressor Flow" src="https://github.com/user-attachments/assets/91c1f391-8c9a-4b20-80c2-20ffb9ad78b4" width="80%" />
+   <img alt="LLM Compressor Flow" src="https://github.com/user-attachments/assets/adf07594-6487-48ae-af62-d9555046d51b" width="80%" />
 </p>
 
 ### Supported Formats
@@ -39,6 +39,8 @@ Applying quantization with `llmcompressor`:
 * [Activation quantization to `fp8`](examples/quantization_w8a8_fp8)
 * [Weight only quantization to `int4`](examples/quantization_w4a16)
 * [Quantizing MoE LLMs](examples/quantizing_moe)
+* [Quantizing Vision-Language Models](examples/multimodal_vision)
+* [Quantizing Audio-Language Models](examples/multimodal_audio)
 
 ### User Guides
 Deep dives into advanced usage of `llmcompressor`:
@@ -54,9 +56,9 @@ Note that the model can be swapped for a local or remote HF-compatible checkpoin
 Quantization is applied by selecting an algorithm and calling the `oneshot` API.
 
 ```python
-from llmcompressor.modifiers.quantization import GPTQModifier
 from llmcompressor.modifiers.smoothquant import SmoothQuantModifier
-from llmcompressor.transformers import oneshot
+from llmcompressor.modifiers.quantization import GPTQModifier
+from llmcompressor import oneshot
 
 # Select quantization algorithm. In this case, we:
 #   * apply SmoothQuant to make the activations easier to quantize

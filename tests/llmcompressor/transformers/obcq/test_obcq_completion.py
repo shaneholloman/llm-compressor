@@ -4,7 +4,7 @@ import unittest
 import pytest
 from parameterized import parameterized_class
 
-from tests.testing_utils import parse_params, requires_gpu, requires_torch
+from tests.testing_utils import parse_params, requires_gpu
 
 CONFIGS_DIRECTORY = "tests/llmcompressor/transformers/obcq/obcq_configs/completion"
 GPU_CONFIGS_DIRECTORY = (
@@ -22,13 +22,11 @@ class TestOBCQCompletion(unittest.TestCase):
         from torch.utils.data import DataLoader
         from transformers import AutoTokenizer, DefaultDataCollator
 
+        from llmcompressor.args import DatasetArguments
         from llmcompressor.transformers.finetune.data import TextGenerationDataset
-        from llmcompressor.transformers.finetune.data.data_args import (
-            DataTrainingArguments,
-        )
 
         tokenizer = AutoTokenizer.from_pretrained(model_name)
-        data_args = DataTrainingArguments(
+        data_args = DatasetArguments(
             dataset=dataset_name,
             max_seq_length=512,
             pad_to_max_length=False,
@@ -37,11 +35,9 @@ class TestOBCQCompletion(unittest.TestCase):
             data_args.dataset,
             data_args=data_args,
             split="train",
-            tokenizer=tokenizer,
+            processor=tokenizer,
         )
-        calib_dataset = dataset_manager.tokenize_and_process(
-            dataset_manager.get_raw_dataset()
-        )
+        calib_dataset = dataset_manager()
         data_loader = DataLoader(
             calib_dataset, batch_size=1, collate_fn=DefaultDataCollator()
         )
@@ -51,9 +47,9 @@ class TestOBCQCompletion(unittest.TestCase):
     def _test_oneshot_completion(self, model_name: str = None):
         import torch
 
+        from llmcompressor import oneshot
         from llmcompressor.pytorch.model_load.helpers import get_session_model
         from llmcompressor.pytorch.utils import tensors_to_device
-        from llmcompressor.transformers import oneshot
 
         oneshot(
             model=self.model,
@@ -66,7 +62,6 @@ class TestOBCQCompletion(unittest.TestCase):
             output_dir=self.output,
             clear_sparse_session=False,
             precision="bfloat16",
-            bf16=True,
         )
 
         first_tiny_model = get_session_model()
@@ -99,7 +94,6 @@ class TestOBCQCompletion(unittest.TestCase):
         shutil.rmtree(self.output)
 
 
-@requires_torch
 @requires_gpu
 @pytest.mark.integration
 @parameterized_class(parse_params(CONFIGS_DIRECTORY))
@@ -121,7 +115,6 @@ class TestOBCQCompletionSmall(TestOBCQCompletion):
         self._test_oneshot_completion()
 
 
-@requires_torch
 @requires_gpu
 @pytest.mark.integration
 @parameterized_class(parse_params(GPU_CONFIGS_DIRECTORY))
@@ -136,14 +129,13 @@ class TestOBCQCompletionGPU(TestOBCQCompletion):
 
     def setUp(self):
         import torch
-
-        from llmcompressor.transformers import SparseAutoModelForCausalLM
+        from transformers import AutoModelForCausalLM
 
         self.model_name = None
         self.output = "./oneshot_output"
 
         self.model_name = self.model
-        self.model = SparseAutoModelForCausalLM.from_pretrained(
+        self.model = AutoModelForCausalLM.from_pretrained(
             self.model, device_map=self.device, torch_dtype=torch.bfloat16
         )
 

@@ -1,6 +1,6 @@
 import pytest
 
-from llmcompressor.transformers.finetune.data.data_args import DataTrainingArguments
+from llmcompressor.args import DatasetArguments
 from llmcompressor.transformers.finetune.data.data_helpers import (
     get_raw_dataset,
     make_dataset_splits,
@@ -9,31 +9,22 @@ from llmcompressor.transformers.finetune.data.data_helpers import (
 
 @pytest.mark.unit
 def test_combined_datasets():
-    data_args = DataTrainingArguments(
+    data_args = DatasetArguments(
         dataset="wikitext", dataset_config_name="wikitext-2-raw-v1"
     )
     raw_wikitext2 = get_raw_dataset(data_args)
     datasets = {"all": raw_wikitext2}
-
-    split_datasets = make_dataset_splits(
-        datasets, do_train=True, do_eval=True, do_predict=True
-    )
+    split_datasets = make_dataset_splits(datasets, do_train=True)
     assert split_datasets.get("train") is not None
-    assert split_datasets.get("validation") is not None
-    assert split_datasets.get("test") is not None
 
-    split_datasets = make_dataset_splits(
-        datasets, do_train=True, do_eval=False, do_predict=True
-    )
+    split_datasets = make_dataset_splits(datasets, do_train=True)
     assert split_datasets.get("train") is not None
-    assert split_datasets.get("validation") is None
-    assert split_datasets.get("test") is not None
 
 
 @pytest.mark.unit
 def test_separate_datasets():
-    splits = {"train": "train[:10%]", "validation": "train[10%:20%]"}
-    data_args = DataTrainingArguments(
+    splits = {"train": "train[:5%]", "validation": "train[5%:7%]"}
+    data_args = DatasetArguments(
         dataset="wikitext", dataset_config_name="wikitext-2-raw-v1"
     )
     datasets = {}
@@ -41,15 +32,11 @@ def test_separate_datasets():
         raw_wikitext2 = get_raw_dataset(data_args, split=split_str)
         datasets[split_name] = raw_wikitext2
 
-    split_datasets = make_dataset_splits(
-        datasets, do_train=True, do_eval=True, do_predict=False
-    )
+    split_datasets = make_dataset_splits(datasets, do_train=True)
     assert split_datasets.get("train") is not None
-    assert split_datasets.get("validation") is not None
-    assert split_datasets.get("test") is None
 
     with pytest.raises(ValueError):
         # fails due to no test split specified
-        split_datasets = make_dataset_splits(
-            datasets, do_train=True, do_eval=True, do_predict=True
-        )
+
+        datasets.pop("train")
+        split_datasets = make_dataset_splits(datasets, do_train=True)

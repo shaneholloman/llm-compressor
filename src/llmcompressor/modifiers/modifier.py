@@ -1,16 +1,15 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Optional
-
-from pydantic import BaseModel
 
 from llmcompressor.core.events import Event, EventType
 from llmcompressor.core.state import State
 from llmcompressor.modifiers.interface import ModifierInterface
+from llmcompressor.modifiers.utils.hooks import HooksMixin
 
 __all__ = ["Modifier"]
 
 
-class Modifier(BaseModel, ModifierInterface, ABC):
+class Modifier(ModifierInterface, HooksMixin):
     """
     A base class for all modifiers to inherit from.
     Modifiers are used to modify the training process for a model.
@@ -30,19 +29,10 @@ class Modifier(BaseModel, ModifierInterface, ABC):
     end: Optional[float] = None
     update: Optional[float] = None
 
-    initialized_structure_: bool = False
     initialized_: bool = False
     finalized_: bool = False
     started_: bool = False
     ended_: bool = False
-
-    @property
-    def initialized_structure(self) -> bool:
-        """
-        :return: True if the modifier structure has been
-            applied to the model
-        """
-        return self.initialized_structure_
 
     @property
     def initialized(self) -> bool:
@@ -78,15 +68,6 @@ class Modifier(BaseModel, ModifierInterface, ABC):
         :return: the end epoch for the modifier if set, else -1
         """
         return self.end if self.end is not None else -1
-
-    def pre_initialize_structure(self, state: State, **kwargs):
-        """
-        :param state: The current state of the model
-        :param kwargs: Additional arguments for initializing the structure
-            of the model in question
-        """
-        self.on_initialize_structure(state, **kwargs)
-        self.initialized_structure_ = True
 
     def initialize(self, state: State, **kwargs):
         """
@@ -221,19 +202,6 @@ class Modifier(BaseModel, ModifierInterface, ABC):
         current = event.current_index
 
         return self.end is not None and current >= self.end
-
-    def on_initialize_structure(self, state: State, **kwargs):
-        """
-        on_initialize_structure is called before the model is initialized
-        with the modifier structure.
-
-        TODO: Depreciate this function as part of the lifecycle
-
-        :param state: The current state of the model
-        :param kwargs: Additional arguments for initializing the structure
-            of the model in question
-        """
-        pass
 
     @abstractmethod
     def on_initialize(self, state: State, **kwargs) -> bool:

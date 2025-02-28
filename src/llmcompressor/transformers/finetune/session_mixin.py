@@ -7,36 +7,32 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import torch
 from loguru import logger
 from torch.nn import Module
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import IterableDataset
 from transformers.trainer_callback import TrainerState
 from transformers.trainer_utils import get_last_checkpoint
 
 from llmcompressor.core import (
     active_session,
-    apply,
     callbacks,
     create_session,
     finalize,
     initialize,
-    pre_initialize_structure,
 )
 from llmcompressor.metrics import LoggerManager
 from llmcompressor.modifiers.distillation.utils.pytorch.model_wrapper import (
     KDModelWrapper,
 )
-from llmcompressor.pytorch.model_load.helpers import RECIPE_FILE_NAME, get_session_model
+from llmcompressor.pytorch.model_load.helpers import get_session_model, save_checkpoint
 from llmcompressor.pytorch.utils import ModuleSparsificationInfo
 from llmcompressor.transformers.finetune.callbacks import (
     DisableHalfPrecisionCallback,
     TrainingLoopCallbacks,
 )
 from llmcompressor.utils.fsdp.context import summon_full_params_context
-from llmcompressor.utils.fsdp.helpers import is_fsdp_model, save_pretrained_fsdp
 from llmcompressor.utils.pytorch import qat_active
 
 if TYPE_CHECKING:
-    from llmcompressor.transformers import DataTrainingArguments
-
+    from llmcompressor.args import DatasetArguments, ModelArguments
 
 __all__ = [
     "SessionManagerMixIn",
@@ -45,7 +41,6 @@ __all__ = [
 TRAINER_STATE_NAME = "trainer_state.json"
 METADATA_ARGS = [
     "per_device_train_batch_size",
-    "per_device_eval_batch_size",
     "max_seq_length",
     "save_safetensors",
     "fp16",
@@ -65,27 +60,43 @@ class SessionManagerMixIn:
 
     def __init__(
         self,
-        recipe: Optional[str] = None,
-        recipe_args: Optional[Union[Dict[str, Any], str]] = None,
-        data_args: Optional["DataTrainingArguments"] = None,
+        recipe: str,
+        data_args: "DatasetArguments",
+        model_args: "ModelArguments",
         teacher: Optional[Union[Module, str]] = None,
+        recipe_args: Optional[Union[Dict[str, Any], str]] = None,
         **kwargs,
     ):
         self.recipe = recipe
         self.recipe_args = recipe_args
+        self.model_args = model_args
         self.teacher = teacher
 
         # parse training and metadata args
         training_args = kwargs.get("args")
-        self.metadata = (
-            self._extract_metadata(
+
+        self.metadata = None
+        if training_args is not None:
+            # trl_sft_trainer pathway. Both training_args and data_args
+            # have `max_seq_length` which causes collision error. This is the
+            # only shared parameter, where training arg is `TRLSFTConfig` that
+            # inherits HuggingFace's `TrainingArguments`
+            training_args_dict = training_args.to_dict()
+            if "max_seq_length" in training_args_dict:
+                training_args_dict["training_args_max_seq_length"] = (
+                    training_args_dict.pop("max_seq_length")
+                )
+                logger.warning(
+                    "Detected `max_seq_length` in both data_args ",
+                    "and training_args. This is expected for TRL in distillation. ",
+                    "Updating metadata to `training_args_max_seq_length`",
+                )
+
+            self.metadata = self._extract_metadata(
                 metadata_args=METADATA_ARGS,
-                training_args_dict=training_args.to_dict(),
+                training_args_dict=training_args_dict,
                 data_args_dict=asdict(data_args) if data_args else {},
             )
-            if training_args and METADATA_ARGS
-            else None
-        )
 
         # setup metrics and session
         self.logger_manager = LoggerManager(log_python=False)
@@ -165,26 +176,6 @@ class SessionManagerMixIn:
 
         torch.cuda.empty_cache()
 
-    def initialize_structure(self, stage: Optional[str] = None):
-        """
-        Initialize any recipe structural changes such as quantization on the model,
-        return immediately if session has already been initialized
-
-        :param stage: Optional stage of recipe to run, or None to run all stages
-        """
-        session = active_session()
-        if session.lifecycle.initialized_:
-            return False
-
-        pre_initialize_structure(
-            model=self.model,
-            recipe=self.recipe,
-            recipe_stage=stage,
-            recipe_args=self.recipe_args,
-        )
-        logger.info(f"Initialized LLM Compressor structure from recipe {self.recipe}")
-        torch.cuda.empty_cache()
-
     def finalize_session(self):
         """
         Wrap up training by finalizing all modifiers initialized in the current session
@@ -249,10 +240,15 @@ class SessionManagerMixIn:
 
         # TODO: we don't currently have a LR scheduler in the new modifier framework
         self._check_super_defined("create_scheduler")
-        return super().create_scheduler(num_training_steps, optimizer)
+        return super().create_scheduler(
+            num_training_steps=num_training_steps, optimizer=optimizer
+        )
 
     def training_step(
-        self, model: Module, inputs: Dict[str, Union[torch.Tensor, Any]]
+        self,
+        model: torch.nn.Module,
+        inputs: Dict[str, Union[torch.Tensor, Any]],
+        num_items_in_batch: Optional[int] = None,
     ) -> torch.Tensor:
         """
         Overrides the Trainer's training step to trigger the batch_start callback to
@@ -265,12 +261,18 @@ class SessionManagerMixIn:
         self._check_super_defined("training_step")
 
         callbacks.batch_start(batch_data=inputs)
-        model_outputs = super().training_step(model, inputs)
+        model_outputs = super().training_step(
+            model=model, inputs=inputs, num_items_in_batch=num_items_in_batch
+        )
 
         return model_outputs
 
     def compute_loss(
-        self, model: Module, inputs: Dict[str, Any], return_outputs: bool = False
+        self,
+        model: Module,
+        inputs: Dict[str, Any],
+        return_outputs: bool = False,
+        num_items_in_batch: Optional[int] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Any]]:
         """
         Override for the compute_loss to factor trigger callbacks and filter columns
@@ -286,7 +288,12 @@ class SessionManagerMixIn:
 
         # TODO: do we need these model signature columns?
         inputs = {k: inputs[k] for k in inputs if k in self._signature_columns}
-        loss = super().compute_loss(model, inputs, return_outputs=return_outputs)
+        loss = super().compute_loss(
+            model=model,
+            inputs=inputs,
+            return_outputs=return_outputs,
+            num_items_in_batch=num_items_in_batch,
+        )
 
         # take the mean across multiple GPUs
         # this is done outside the compute_loss function in the parent, replicating it
@@ -314,28 +321,6 @@ class SessionManagerMixIn:
 
         return loss
 
-    def prediction_step(
-        self,
-        model: Module,
-        inputs: Dict[str, Union[torch.Tensor, Any]],
-        prediction_loss_only: bool,
-        ignore_keys: Optional[List[str]] = None,
-    ) -> Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        """
-        Wraps the prediction step from the original trainer to remove any input entry
-        that should not be passed to the model.
-        This situation may arise when distillation is used and the teacher model
-        contains more inputs than the student model.
-        """
-        self._check_super_defined("prediction_step")
-
-        inputs = {k: inputs[k] for k in inputs if k in self._model_signature_columns}
-
-        model_outputs = super().prediction_step(
-            model, inputs, prediction_loss_only, ignore_keys
-        )
-        return model_outputs
-
     def train(self, *args, stage: Optional[str] = None, **kwargs):
         """
         Run a sparsification training cycle. Runs initialization for the sparse session
@@ -354,8 +339,8 @@ class SessionManagerMixIn:
         self.initialize_session(epoch=epoch, checkpoint=checkpoint, stage=stage)
 
         # do not save checkpoints as compressed
-        original_save_compressed = self.args.save_compressed
-        self.args.save_compressed = False
+        original_save_compressed = self.model_args.save_compressed
+        self.model_args.save_compressed = False
 
         # train with accelerator
         self.accelerator.wait_for_everyone()
@@ -363,7 +348,7 @@ class SessionManagerMixIn:
         self.accelerator.wait_for_everyone()
 
         # restore original setting for saving final model
-        self.args.save_compressed = original_save_compressed
+        self.model_args.save_compressed = original_save_compressed
 
         # lifecycle
         self.finalize_session()
@@ -375,67 +360,7 @@ class SessionManagerMixIn:
 
         return output
 
-    def evaluate(self, *args, **kwargs):
-        """
-        Run a sparsification evaluation cycle.
-        Runs initialize_structure for the sparse session before calling
-        super().evaluate() and finalization of the session after.
-
-        :param args: positional args to pass to super().evaluate()
-        :param kwargs: keyword args to pass to super().evaluate()
-        :return: the output from super.evaluate()
-        """
-        self.initialize_structure()
-
-        output = super().evaluate(*args, **kwargs)
-        self.finalize_session()
-
-        return output
-
-    def predict(self, *args, **kwargs):
-        """
-        Run a sparsification prediction cycle.
-        Runs initialize_structure for the sparse session before calling
-        super().predict() and finalization of the session after.
-
-        :param args: positional args to pass to super().predict()
-        :param kwargs: keyword args to pass to super().predict()
-        :return: the output from super.predict()
-        """
-        self.initialize_structure()
-        output = super().predict(*args, **kwargs)
-        self.finalize_session()
-
-        return output
-
-    def one_shot(
-        self, calibration_data: Optional[DataLoader] = None, stage: Optional[str] = None
-    ):
-        """
-        Run oneshot calibration on the active model
-
-        :param stage: which stage of the recipe to run, or None to run whole recipe
-        :param calib_data: dataloader of calibration data
-        """
-        apply(
-            recipe=self.recipe,
-            recipe_stage=stage,
-            recipe_args=self.recipe_args,
-            model=self.model,
-            calib_data=calibration_data,
-            start=-1,
-            copy_data=False,
-            accelerator=self.accelerator,
-            min_tokens_per_module=self.min_tokens_per_module,
-        )
-
-        # log model sparsity
-        # self.maybe_log_model_sparsification()
-        self.accelerator.wait_for_everyone()
-
-    def save_model(
-        self, output_dir: Optional[str] = None, _internal_call=False, _is_oneshot=False
-    ):
+    def save_model(self, output_dir: str, _internal_call=False, _is_oneshot=False):
         """
         Override of the save_model function and expects it to exist in the parent.
         Calls into super() to save the model and additionally saves any recipes
@@ -451,43 +376,19 @@ class SessionManagerMixIn:
 
         # knowledge distillation requires making wrappers transparent during
         if isinstance(self.model, KDModelWrapper):
-            self.model.prepare_for_save()
+            self.model.prepare_for_save()  # TODO: move to finalize
 
-        if not is_fsdp_model(self.model):
-            self.model.save_pretrained(
-                output_dir,
-                save_compressed=self.args.save_compressed,
-                safe_serialization=self.args.save_safetensors,
-            )
-        else:  # FSDP model
-            save_pretrained_fsdp(
-                model=self.model,
-                accelerator=self.accelerator,
-                output_dir=output_dir,
-                save_compressed=self.args.save_compressed,
-                save_safetensors=self.metadata.get("save_safetensors", False),
-            )
-
+        # save checkpoint
         self.save_state()
-        if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(output_dir)
-
-        if not self.recipe:
-            return
-
         if self.accelerator.is_main_process:
-            # save recipe, will contain modifiers from the model's original recipe as
-            # well as those added from self.recipe
-            recipe_path = os.path.join(output_dir, RECIPE_FILE_NAME)
-            session = active_session()
-            recipe_yaml_str = session.get_serialized_recipe()
-            with open(recipe_path, "w") as fp:
-                fp.write(recipe_yaml_str)
-
-            logger.info(
-                f"Saved LLM Compressor recipe with model state to {recipe_path}"
+            processor = getattr(self, "processing_class", self.tokenizer)
+            save_checkpoint(
+                output_dir,
+                model=self.model,
+                processor=processor,
+                save_safetensors=self.args.save_safetensors,
+                save_compressed=self.model_args.save_compressed,
             )
-
         self.accelerator.wait_for_everyone()
 
         if isinstance(self.model, KDModelWrapper):

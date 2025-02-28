@@ -1,23 +1,24 @@
 import unittest
+from unittest.mock import MagicMock
 
 import pytest
 
-from tests.testing_utils import requires_torch
+from llmcompressor.core.state import State
+from llmcompressor.modifiers.obcq import SparseGPTModifier
 
 
 @pytest.mark.integration
-@requires_torch
 class TestLMHead(unittest.TestCase):
     def setUp(self):
         import torch
-
-        from llmcompressor.transformers import SparseAutoModelForCausalLM
+        from transformers import AutoModelForCausalLM
 
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-        self.model = SparseAutoModelForCausalLM.from_pretrained(
+        self.model = AutoModelForCausalLM.from_pretrained(
             "Xenova/llama2.c-stories15M", device_map=self.device
         )
+
         self.kwargs = {
             "sparsity": 0.5,
             "block_size": 128,
@@ -32,21 +33,31 @@ class TestLMHead(unittest.TestCase):
             ],
         }
 
-    def test_lm_head_target(self):
-        from llmcompressor.core.state import State
-        from llmcompressor.modifiers.obcq import SparseGPTModifier
+        dataset = MagicMock()
+        dataset.column_names = []
+        self.dataloader = MagicMock()
+        self.dataloader.dataset = dataset
+        self.dataloader.__iter__.return_value = iter([])
 
-        sparsegpt_modifier_no_head = SparseGPTModifier(**self.kwargs)
+    def test_no_lm_head_target(self):
+        modifier = SparseGPTModifier(**self.kwargs)
 
         state = State()
-        state.update(model=self.model, device=self.device)
-        sparsegpt_modifier_no_head.initialize_compression(state.model)
+        state.update(model=self.model, device=self.device, calib_data=self.dataloader)
+        modifier.on_initialize(state)
 
+        assert len(self.model.lm_head._forward_hooks) <= 0
+
+        modifier.finalize(state)
+
+    def test_lm_head_target(self):
         self.kwargs["targets"].append("lm_head")
-        sparsegpt_modifier_head = SparseGPTModifier(**self.kwargs)
-        sparsegpt_modifier_head.initialize_compression(state.model)
+        modifier = SparseGPTModifier(**self.kwargs)
 
-        # check we pick up the lm_head layer
-        layers_no_head = len(sparsegpt_modifier_no_head.compressible_layers_)
-        layers_head = len(sparsegpt_modifier_head.compressible_layers_)
-        self.assertEqual(layers_head, layers_no_head + 1)
+        state = State()
+        state.update(model=self.model, device=self.device, calib_data=self.dataloader)
+        modifier.on_initialize(state)
+
+        assert len(self.model.lm_head._forward_hooks) == 1
+
+        modifier.finalize(state)

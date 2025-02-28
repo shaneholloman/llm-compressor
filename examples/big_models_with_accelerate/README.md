@@ -14,13 +14,13 @@
 To enable `accelerate` features with `llmcompressor`, simple insert `device_map` in `from_pretrained` during model load.
 
 ```python
-from llmcompressor.transformers import SparseAutoModelForCausalLM
+from transformers import AutoModelForCausalLM
 MODEL_ID = "meta-llama/Meta-Llama-3-70B-Instruct"
 
 # device_map="auto" triggers usage of accelerate
 # if > 1 GPU, the model will be sharded across the GPUs
 # if not enough GPU memory to fit the model, parameters are offloaded to the CPU
-model = SparseAutoModelForCausalLM.from_pretrained(
+model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, device_map="auto", torch_dtype="auto")
 ```
 
@@ -34,12 +34,12 @@ potentially going out-of-memory.
 
 ```python
 from llmcompressor.transformers.compression.helpers import calculate_offload_device_map
-from llmcompressor.transformers import SparseAutoModelForCausalLM,
+from transformers import AutoModelForCausalLM
 MODEL_ID = "meta-llama/Meta-Llama-3-70B-Instruct"
 
 # Load model, reserving memory in the device map for sequential GPTQ (adjust num_gpus as needed)
 device_map = calculate_offload_device_map(MODEL_ID, reserve_for_hessians=True, num_gpus=1)
-model = SparseAutoModelForCausalLM.from_pretrained(
+model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID,
     device_map=device_map,
     torch_dtype="auto",
@@ -54,7 +54,7 @@ When working with `accelerate`, it is important to keep in mind that CPU offload
 
 We will show working examples for each use case:
 - **CPU Offloading**: Quantize `Llama-70B` to `FP8` using `PTQ` with a single GPU
-- **Multi-GPU**: Quantize `Llama-70B` to `INT8` using `GPTQ` and `SmoothQuant` with 8 GPUs
+- **Multi-GPU**: Quantize `Llama-70B` to `INT8` using `GPTQ` and `SmoothQuant` with 2 GPUs
 
 ### Installation
 
@@ -81,12 +81,10 @@ The resulting model `./Meta-Llama-3-70B-Instruct-FP8-Dynamic` is ready to run wi
 
 For quantization methods that require calibration data (e.g. `GPTQ`), CPU offloading is too slow. For these methods, `llmcompressor` can use `accelerate` multi-GPU to quantize models that are larger than a single GPU. For example, when quantizing a model to `int8`, we typically use `GPTQ` to statically quantize the weights, which requires calibration data.
 
-Note that running non-sequential `GPTQ` requires significant additional memory beyond the model size. As a rough rule of thumb, running `GPTQModifier` non-sequentially will take up 3x the model size for a 16-bit model and 2x the model size for a 32-bit model (these estimates include the memory required to store the model itself in GPU).
-
-- `multi_gpu_int8.py` demonstrates quantizing the weights and activations of `Llama-70B` to `int8` on 8 A100s:
+- `multi_gpu_int8.py` demonstrates quantizing the weights and activations of `Llama-70B` to `int8` on 2 A100s:
 
 ```python
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1
 python multi_gpu_int8.py
 ```
 

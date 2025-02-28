@@ -1,5 +1,4 @@
 import functools
-import pathlib
 from collections import namedtuple
 from typing import Dict, List, Tuple, Union
 
@@ -24,7 +23,7 @@ DEFAULT_SMOOTHQUANT_MAPPINGS: List[LayerMap] = [
         smooth_layers="re:.*post_attention_layernorm",
     ),
 ]
-MIXTRAL_MAPPINGS: List[LayerMap] = [
+MIXTRAL_SMOOTHQUANT_MAPPINGS: List[LayerMap] = [
     LayerMap(
         balance_layers=["re:.*q_proj", "re:.*k_proj", "re:.*v_proj"],
         smooth_layers="re:.*input_layernorm",
@@ -33,15 +32,49 @@ MIXTRAL_MAPPINGS: List[LayerMap] = [
         balance_layers=["re:.*gate"], smooth_layers="re:.*post_attention_layernorm"
     ),
 ]
+BLOOM_SMOOTHQUANT_MAPPINGS: List[LayerMap] = [
+    LayerMap(
+        balance_layers=["re:.*query_key_value"],
+        smooth_layers="re:.*input_layernorm",
+    ),
+    LayerMap(
+        balance_layers=["re:.*dense_h_to_4h"],
+        smooth_layers="re:.*post_attention_layernorm",
+    ),
+]
+PHI3_VISION_SMOOTHQUANT_MAPPINGS: List[LayerMap] = [
+    LayerMap(
+        balance_layers=["re:.*qkv_proj"],
+        smooth_layers="re:.*input_layernorm",
+    ),
+    LayerMap(
+        balance_layers=["re:.*gate_up_proj"],
+        smooth_layers="re:.*post_attention_layernorm",
+    ),
+]
+WHISPER_V2_SMOOTHQUANT_MAPPINGS: List[LayerMap] = [
+    LayerMap(
+        balance_layers=["re:.*k_proj", "re:.*v_proj", "re:.*q_proj"],
+        smooth_layers="re:.*self_attn_layer_norm",
+    ),
+    LayerMap(
+        balance_layers=["re:.*fc1"],
+        smooth_layers="re:.*final_layer_norm",
+    ),
+]
 
 
 # Registry of layer mappings for different architectures
 #   Add more mappings here
 MAPPINGS_REGISTRY: Dict[str, List[LayerMap]] = {
     "LlamaForCausalLM": DEFAULT_SMOOTHQUANT_MAPPINGS,
-    "MixtralForCausalLM": MIXTRAL_MAPPINGS,
+    "MixtralForCausalLM": MIXTRAL_SMOOTHQUANT_MAPPINGS,
     "MistralForCausalLM": DEFAULT_SMOOTHQUANT_MAPPINGS,
     "Qwen2ForCausalLM": DEFAULT_SMOOTHQUANT_MAPPINGS,
+    "BloomForCausalLM": BLOOM_SMOOTHQUANT_MAPPINGS,
+    "ChatGLMForConditionalGeneration": BLOOM_SMOOTHQUANT_MAPPINGS,
+    "Phi3VForCausalLM": PHI3_VISION_SMOOTHQUANT_MAPPINGS,
+    "WhisperForConditionalGeneration": WHISPER_V2_SMOOTHQUANT_MAPPINGS,
 }
 
 
@@ -71,7 +104,10 @@ def handle_mapping_resolution_errors(func):
         try:
             return func(*args, **kwargs)
         except Exception as original_exception:
-            readme_location = pathlib.Path(__file__).parent / "README.md"
+            readme_location = (
+                "https://github.com/vllm-project/llm-compressor/tree/main/"
+                "src/llmcompressor/modifiers/smoothquant"
+            )
             raise RuntimeError(
                 f"Error resolving mappings for given architecture."
                 f"Please refer to the README at {readme_location} for more information."

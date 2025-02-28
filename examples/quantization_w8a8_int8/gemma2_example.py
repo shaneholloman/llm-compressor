@@ -1,12 +1,12 @@
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from llmcompressor import oneshot
 from llmcompressor.modifiers.quantization import GPTQModifier
-from llmcompressor.transformers import SparseAutoModelForCausalLM, oneshot
 
 # 1) Select model and load it.
 MODEL_ID = "google/gemma-2-2b-it"
-model = SparseAutoModelForCausalLM.from_pretrained(
+model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID,
     device_map="auto",
     torch_dtype="auto",
@@ -68,6 +68,9 @@ oneshot(
 )
 
 # Confirm generations of the quantized model look sane.
+# NOTE: transformers 4.49.0 results in a generation error with gemma2.
+# Consider either downgrading your transformers version to a previous version
+# or use vLLM for sample generation.
 print("========== SAMPLE GENERATION ==============")
 input_ids = tokenizer("Hello my name is", return_tensors="pt").input_ids.to("cuda")
 output = model.generate(input_ids, max_new_tokens=20)
