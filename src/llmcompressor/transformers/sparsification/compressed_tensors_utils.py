@@ -120,7 +120,9 @@ def modify_save_pretrained(model: PreTrainedModel):
 
             # make sure we're on the main process when saving
             if state_dict is not None and len(state_dict) > 0:
-                compressed_state_dict = compressor.compress(model, state_dict)
+                compressed_state_dict = compressor.compress(
+                    model, state_dict, show_progress=True
+                )
                 logger.info("Saving compressed model to disk")
                 original_save_pretrained.__get__(model, model_class)(
                     save_directory,
@@ -297,7 +299,7 @@ def update_and_save_recipe(model_stub: str, save_directory: str):
     if existing_recipe is not None:
         recipes_to_save.append(existing_recipe)
 
-    new_recipe = active_session().lifecycle.recipe_container.compiled_recipe
+    new_recipe = active_session().lifecycle.recipe
     if new_recipe is not None:
         recipes_to_save.append(new_recipe)
 
