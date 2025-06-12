@@ -122,9 +122,9 @@ setup(
         "pynvml",
         "pillow",
         (
-            "compressed-tensors==0.9.4"
+            "compressed-tensors==0.10.1"
             if BUILD_TYPE == "release"
-            else "compressed-tensors>=0.9.5a2"
+            else "compressed-tensors>=0.10.2a2"
         ),
     ],
     extras_require={
@@ -139,7 +139,7 @@ setup(
             "beautifulsoup4~=4.12.3",
             "cmarkgfm~=2024.1.14",
             "trl>=0.10.1",
-            "pandas",
+            "pandas<2.3.0",
             "torchvision",
             "librosa",
             "soundfile",

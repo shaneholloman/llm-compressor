@@ -2,25 +2,24 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from llmcompressor import oneshot
-from llmcompressor.modifiers.quantization import GPTQModifier
+from llmcompressor.modifiers.awq import AWQModifier
 
-# 1) Select model and load it.
-MODEL_ID = "google/gemma-2-2b-it"
+# Select model and load it.
+MODEL_ID = "Qwen/Qwen3-30B-A3B"
+
 model = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID,
-    device_map="auto",
-    torch_dtype="auto",
+    MODEL_ID, device_map="auto", torch_dtype="auto"
 )
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
 
-# 2) Prepare calibration dataset.
-DATASET_ID = "HuggingFaceH4/ultrachat_200k"
-DATASET_SPLIT = "train_sft"
+# Select calibration dataset.
+DATASET_ID = "mit-han-lab/pile-val-backup"
+DATASET_SPLIT = "validation"
 
-# Select number of samples. 512 samples is a good place to start.
+# Select number of samples. 256 samples is a good place to start.
 # Increasing the number of samples can improve accuracy.
-NUM_CALIBRATION_SAMPLES = 512
-MAX_SEQUENCE_LENGTH = 2048
+NUM_CALIBRATION_SAMPLES = 256
+MAX_SEQUENCE_LENGTH = 512
 
 # Load dataset and preprocess.
 ds = load_dataset(DATASET_ID, split=f"{DATASET_SPLIT}[:{NUM_CALIBRATION_SAMPLES}]")
@@ -30,7 +29,7 @@ ds = ds.shuffle(seed=42)
 def preprocess(example):
     return {
         "text": tokenizer.apply_chat_template(
-            example["messages"],
+            [{"role": "user", "content": example["text"]}],
             tokenize=False,
         )
     }
@@ -50,14 +49,17 @@ def tokenize(sample):
     )
 
 
-ds = ds.map(tokenize, remove_columns=ds.column_names)
+# Configure the quantization algorithm to run.
+# NOTE: vllm currently does not support asym MoE, using symmetric here
+recipe = [
+    AWQModifier(
+        ignore=["lm_head", "re:.*mlp.gate$", "re:.*mlp.shared_expert_gate$"],
+        scheme="W4A16",
+        targets=["Linear"],
+    ),
+]
 
-# 3) Select quantization algorithms. In this case, we:
-#   * quantize the weights to int8 with GPTQ (static per channel)
-#   * quantize the activations to int8 (dynamic per token)
-recipe = GPTQModifier(targets="Linear", scheme="W8A8", ignore=["lm_head"])
-
-# 4) Apply quantization
+# Apply algorithms.
 oneshot(
     model=model,
     dataset=ds,
@@ -67,16 +69,14 @@ oneshot(
 )
 
 # Confirm generations of the quantized model look sane.
-# NOTE: transformers 4.49.0 results in a generation error with gemma2.
-# Consider either downgrading your transformers version to a previous version
-# or use vLLM for sample generation.
+print("\n\n")
 print("========== SAMPLE GENERATION ==============")
 input_ids = tokenizer("Hello my name is", return_tensors="pt").input_ids.to("cuda")
-output = model.generate(input_ids, max_new_tokens=20)
+output = model.generate(input_ids, max_new_tokens=100)
 print(tokenizer.decode(output[0]))
-print("==========================================")
+print("==========================================\n\n")
 
-# 5) Save to disk in compressed-tensors format.
-SAVE_DIR = MODEL_ID.split("/")[1] + "-INT8"
+# Save to disk compressed.
+SAVE_DIR = MODEL_ID.split("/")[-1] + "-awq-sym"
 model.save_pretrained(SAVE_DIR, save_compressed=True)
 tokenizer.save_pretrained(SAVE_DIR)
