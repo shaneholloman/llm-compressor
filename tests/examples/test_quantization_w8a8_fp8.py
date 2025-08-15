@@ -7,7 +7,7 @@ from tests.examples.utils import (
     ReadMe,
     copy_and_run_command,
     copy_and_run_script,
-    gen_cmd_fail_message,
+    log_and_generate_message,
     requires_gpu_count,
 )
 
@@ -37,7 +37,7 @@ class TestQuantizationW8A8_FP8:
         command = shlex.split(command)
         result = copy_and_run_command(tmp_path, example_dir, command)
 
-        assert result.returncode == 0, gen_cmd_fail_message(command, result)
+        assert result.returncode == 0, log_and_generate_message(command, result)
 
     @pytest.mark.parametrize(
         "script_file",
@@ -51,4 +51,4 @@ class TestQuantizationW8A8_FP8:
         Test for example scripts in the folder.
         """
         command, result = copy_and_run_script(tmp_path, example_dir, script_file)
-        assert result.returncode == 0, gen_cmd_fail_message(command, result)
+        assert result.returncode == 0, log_and_generate_message(command, result)

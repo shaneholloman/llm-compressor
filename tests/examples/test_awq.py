@@ -4,7 +4,7 @@ import pytest
 
 from tests.examples.utils import (
     copy_and_run_script,
-    gen_cmd_fail_message,
+    log_and_generate_message,
     requires_gpu_count,
 )
 
@@ -36,4 +36,4 @@ class TestAWQ:
         """
         command, result = copy_and_run_script(tmp_path, example_dir, script_filename)
 
-        assert result.returncode == 0, gen_cmd_fail_message(command, result)
+        assert result.returncode == 0, log_and_generate_message(command, result)

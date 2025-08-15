@@ -4,11 +4,13 @@ import shutil
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
+from textwrap import indent
 from typing import List, Optional, Tuple, TypeVar, Union
 
 import pytest
 from bs4 import BeautifulSoup, ResultSet, Tag
 from cmarkgfm import github_flavored_markdown_to_html as gfm_to_html
+from loguru import logger
 
 from tests.testing_utils import run_cli_command
 
@@ -89,16 +91,21 @@ def copy_and_run_script(
     return command, copy_and_run_command(tmp_path, example_dir, command)
 
 
-def gen_cmd_fail_message(command: List[str], result: CompletedProcess[str]) -> str:
+def log_and_generate_message(command: List[str], result: CompletedProcess[str]) -> str:
     """
     Generate an failure message including the command and its output.
 
     :param result: a `CompletedProcess` object
     :return: a formatted failure message
     """
+    logger.info(
+        "Command:\n"
+        f"    {shlex.join(command)}\n"
+        "Output:\n"
+        f"{indent(result.stdout, '    ')}"
+    )
     return (
-        f"command failed with exit code {result.returncode}:\n"
-        f"Command:\n{shlex.join(command)}\nOutput:\n{result.stdout}"
+        f"command failed with exit code {result.returncode}\n"
     )
 
 

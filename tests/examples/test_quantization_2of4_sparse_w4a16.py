@@ -9,7 +9,7 @@ from transformers import AutoConfig
 from tests.examples.utils import (
     ReadMe,
     copy_and_run_command,
-    gen_cmd_fail_message,
+    log_and_generate_message,
     requires_gpu_count,
 )
 from tests.testing_utils import run_cli_command
@@ -42,7 +42,7 @@ class TestQuantization24SparseW4A16:
 
         command = shlex.split(command)
         result = copy_and_run_command(tmp_path, example_dir, command)
-        assert result.returncode == 0, gen_cmd_fail_message(command, result)
+        assert result.returncode == 0, log_and_generate_message(command, result)
 
         output_dir = Path("output_llama7b_2of4_w4a16_channel")
 
@@ -106,4 +106,4 @@ class TestQuantization24SparseW4A16:
         command = [sys.executable, script_filename]
         result = run_cli_command(command, cwd=tmp_path / example_dir)
 
-        assert result.returncode == 0, gen_cmd_fail_message(command, result)
+        assert result.returncode == 0, log_and_generate_message(command, result)

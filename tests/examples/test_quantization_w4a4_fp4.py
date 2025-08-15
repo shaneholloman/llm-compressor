@@ -6,7 +6,7 @@ import pytest
 
 from tests.examples.utils import (
     copy_and_run_script,
-    gen_cmd_fail_message,
+    log_and_generate_message,
     requires_gpu_count,
 )
 
@@ -39,7 +39,7 @@ class TestQuantizationW4A4_FP4:
         """
         command, result = copy_and_run_script(tmp_path, example_dir, script_filename)
 
-        assert result.returncode == 0, gen_cmd_fail_message(command, result)
+        assert result.returncode == 0, log_and_generate_message(command, result)
 
         # verify the expected directory was generated
         nvfp4_dirs: List[Path] = [p for p in tmp_path.rglob("*-NVFP4") if p.is_dir()]

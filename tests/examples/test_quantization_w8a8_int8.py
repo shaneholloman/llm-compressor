@@ -7,7 +7,7 @@ from tests.examples.utils import (
     ReadMe,
     copy_and_run_command,
     copy_and_run_script,
-    gen_cmd_fail_message,
+    log_and_generate_message,
     requires_gpu_count,
 )
 
@@ -37,7 +37,7 @@ class TestQuantizationW8A8_Int8:
         command = shlex.split(command)
         result = copy_and_run_command(tmp_path, example_dir, command)
 
-        assert result.returncode == 0, gen_cmd_fail_message(command, result)
+        assert result.returncode == 0, log_and_generate_message(command, result)
 
     def test_gemma2_example_script(self, example_dir: str, tmp_path: Path):
         """
@@ -46,4 +46,4 @@ class TestQuantizationW8A8_Int8:
         script_filename = "gemma2_example.py"
         command, result = copy_and_run_script(tmp_path, example_dir, script_filename)
 
-        assert result.returncode == 0, gen_cmd_fail_message(command, result)
+        assert result.returncode == 0, log_and_generate_message(command, result)
