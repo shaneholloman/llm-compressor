@@ -17,7 +17,7 @@ def setup_model_and_config(tmp_path):
     Loads a test model and returns common arguments used in oneshot runs.
     """
     model = AutoModelForCausalLM.from_pretrained(
-        "Xenova/llama2.c-stories110M",
+        "nm-testing/tinysmokellama-3.2",
         torch_dtype="auto",
     )
 
@@ -67,13 +67,13 @@ DEFAULT_stage:
       scheme: W8A8
 """
 
-    yaml_path = str(Path(__file__).parent / "recipe.yaml")
+    yaml_path = str(Path(__file__).parent / "recipes" / "smoothquant_gptq_w8a8.yaml")
 
     return [python_modifiers, yaml_string, yaml_path]
 
 
 @requires_gpu
-@pytest.mark.regression
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "recipe",
     recipe_variants(),

@@ -22,13 +22,13 @@ from transformers.utils.quantization_config import CompressedTensorsConfig
 from llmcompressor import oneshot
 from llmcompressor.core import reset_session
 from llmcompressor.pytorch.utils.helpers import tensor_sparsity
-from llmcompressor.transformers.compression.sparsity_metadata_config import (
-    SparsityConfigMetadata,
-)
-from llmcompressor.transformers.sparsification.compressed_tensors_utils import (
+from llmcompressor.transformers.compression.compressed_tensors_utils import (
     get_model_compressor,
     modify_save_pretrained,
     untie_word_embeddings,
+)
+from llmcompressor.transformers.compression.sparsity_metadata_config import (
+    SparsityConfigMetadata,
 )
 from tests.testing_utils import requires_gpu
 
@@ -46,7 +46,7 @@ from tests.testing_utils import requires_gpu
 def test_sparse_model_reload(compressed, config, dtype, tmp_path):
     recipe_str = "tests/llmcompressor/transformers/obcq/recipes/test_tiny2.yaml"
     expected_sparsity = 0.5
-    model_path = "nm-testing/llama2.c-stories15M"
+    model_path = "nm-testing/tinysmokellama-3.2"
     dataset = "open_platypus"
     concatenate_data = False
     num_calibration_samples = 64
@@ -124,7 +124,7 @@ def test_sparse_model_reload(compressed, config, dtype, tmp_path):
 def test_dense_model_save(tmp_path, skip_compression_stats, save_compressed):
     reset_session()
 
-    model_path = "nm-testing/llama2.c-stories15M"
+    model_path = "nm-testing/tinysmokellama-3.2"
     model = AutoModelForCausalLM.from_pretrained(model_path)
 
     inferred_global_sparsity = SparsityConfigMetadata.infer_global_sparsity(model)
@@ -161,7 +161,7 @@ def test_quant_model_reload(format, dtype, tmp_path):
     recipe_str = (
         "tests/llmcompressor/transformers/compression/recipes/new_quant_simple.yaml"
     )
-    model_path = "nm-testing/llama2.c-stories15M"
+    model_path = "nm-testing/tinysmokellama-3.2"
     device = "cuda:0" if not torch.cuda.is_available() else "cpu"
     dataset = "open_platypus"
     concatenate_data = False
@@ -184,10 +184,14 @@ def test_quant_model_reload(format, dtype, tmp_path):
     og_state_dict = model.state_dict()
     save_path_compressed = tmp_path / "compressed"
 
-    for _, module in model.named_modules():
+    for name, module in model.named_modules():
         if hasattr(module, "quantization_scheme"):
-            assert module.weight.dtype == dtype
-            assert module.quantization_status == QuantizationStatus.FROZEN
+            assert (
+                module.weight.dtype == dtype
+            ), f"Module {name} has incorrect weight dtype"
+            assert (
+                module.quantization_status == QuantizationStatus.FROZEN
+            ), f"Module {name} has incorrect quantization status"
 
     # Save to disk
     model.save_pretrained(
@@ -240,7 +244,7 @@ def test_quant_model_reload(format, dtype, tmp_path):
     ],
 )
 def test_model_reload(offload, torch_dtype, tie_word_embeddings, device, tmp_path):
-    model_path = "nm-testing/llama2.c-stories15M"
+    model_path = "nm-testing/tinysmokellama-3.2"
     save_path = tmp_path / "save_path"
 
     model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch_dtype)
@@ -292,7 +296,7 @@ def test_model_reload_gpu(offload, torch_dtype, tie_word_embeddings, device, tmp
 )
 def test_model_shared_tensors(offload, torch_dtype, tie_word_embeddings, device):
     # load model
-    model_path = "nm-testing/llama2.c-stories15M"
+    model_path = "nm-testing/tinysmokellama-3.2"
     model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch_dtype)
     if offload:
         model = dispatch_model(model, {"": device}, force_hooks=True)
@@ -333,7 +337,7 @@ def test_model_shared_tensors_gpu(offload, torch_dtype, tie_word_embeddings, dev
     "model_stub, recipe, sparse_format, quant_format",
     [
         (
-            "nm-testing/llama2.c-stories15M",
+            "nm-testing/tinysmokellama-3.2",
             "tests/llmcompressor/transformers/compression/recipes/sparse_24_fp8.yaml",
             CompressionFormat.sparse_24_bitmask.value,
             CompressionFormat.float_quantized.value,
@@ -348,7 +352,6 @@ def test_compressor_stacking(model_stub, recipe, sparse_format, quant_format, tm
     concatenate_data = False
     num_calibration_samples = 64
     splits = {"calibration": "train[:10%]"}
-    empty_model = AutoModelForCausalLM.from_pretrained(model_stub, torch_dtype="auto")
 
     oneshot(
         model=model_stub,
@@ -357,7 +360,6 @@ def test_compressor_stacking(model_stub, recipe, sparse_format, quant_format, tm
         recipe=recipe,
         concatenate_data=concatenate_data,
         splits=splits,
-        clear_sparse_session=False,
     )
 
     # Fetch the oneshot model
@@ -365,21 +367,11 @@ def test_compressor_stacking(model_stub, recipe, sparse_format, quant_format, tm
     og_state_dict = model.state_dict()
     path = tmp_path / "compressed"
 
-    # Compress and save
-    model.save_pretrained(
-        path,
-        quantization_format=quant_format,
-        save_compressed=True,
-    )
-
-    # Verify config on disk
-    config = AutoConfig.from_pretrained(path)
-    compression_config = getattr(config, QUANTIZATION_CONFIG_NAME, None)
-    quant_config = ModelCompressor.parse_quantization_config(compression_config)
-
     # As HFQuantizer doesn't decompress the model, use the compressor to decompress
     # the model instead
-    compressor = ModelCompressor.from_compression_config(compression_config)
+    compressor = ModelCompressor.from_pretrained_model(
+        model, sparsity_config=sparse_format, quantization_format=quant_format
+    )
 
     assert (
         compressor.sparsity_compressor is not None
@@ -389,16 +381,15 @@ def test_compressor_stacking(model_stub, recipe, sparse_format, quant_format, tm
     assert (
         compressor.quantization_compressor is not None
     ), "Quantization compressor not initialized"
-    assert quant_config["format"] == quant_format
 
+    compressor.compress_model(model)
+    compressor.decompress_model(model)
     compressor.quantization_config.quantization_status = QuantizationStatus.FROZEN
-    compressor.decompress(model_path=path, model=empty_model)
 
     # Verify the abs difference between the decompressed model
     # and the original model
-    reconstructed_state_dict = empty_model.state_dict()
-    assert len(og_state_dict) == len(reconstructed_state_dict)
-    for key in og_state_dict.keys():
+    reconstructed_state_dict = model.state_dict()
+    for key in reconstructed_state_dict.keys():
         dense_tensor = og_state_dict[key].to(device)
         reconstructed_tensor = reconstructed_state_dict[key].to(device)
         assert dense_tensor.dtype == reconstructed_tensor.dtype
@@ -409,6 +400,16 @@ def test_compressor_stacking(model_stub, recipe, sparse_format, quant_format, tm
             assert not torch.any(diff > 0.025), f"Max diff: {torch.max(diff)}"
         else:
             assert torch.equal(dense_tensor, reconstructed_tensor)
+
+    # Recompress and save; validate correct formats used
+    model.save_pretrained(path)
+    config = AutoConfig.from_pretrained(path)
+    compression_config = getattr(config, QUANTIZATION_CONFIG_NAME, None)
+    quant_config = ModelCompressor.parse_quantization_config(compression_config)
+    sparsity_config = ModelCompressor.parse_sparsity_config(compression_config)
+    assert quant_config["format"] == quant_format
+    assert sparsity_config["format"] == sparse_format
+
     if os.path.isdir(tmp_path):
         shutil.rmtree(tmp_path)
 
@@ -417,7 +418,7 @@ def test_compressor_stacking(model_stub, recipe, sparse_format, quant_format, tm
     "model_stub, recipe, sparse_format",
     [
         (
-            "nm-testing/llama2.c-stories15M",
+            "nm-testing/tinysmokellama-3.2",
             "tests/llmcompressor/transformers/compression/recipes/sparse_24.yaml",
             CompressionFormat.sparse_24_bitmask.value,
         ),
@@ -588,7 +589,7 @@ def _quantization_config_from_string(config_str, q_type):
         quantize_activations=quantize_activations,
         a_bits=a_bits,
         a_type=q_type,
-        a_strategy="channel",
+        a_strategy="tensor",
     )
 
 

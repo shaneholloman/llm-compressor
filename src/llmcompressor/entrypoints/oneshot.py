@@ -1,3 +1,12 @@
+"""
+Oneshot compression entrypoint for post-training model optimization.
+
+Provides the main oneshot compression entry point for applying
+quantization, pruning, and other compression techniques to pre-trained
+models without additional training. Supports calibration-based compression
+with various pipeline configurations for efficient model optimization.
+"""
+
 import os
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional, Union
@@ -125,7 +134,7 @@ class Oneshot:
         self.output_dir = output_dir
 
         # initialize the model and processor
-        pre_process(model_args)
+        pre_process(model_args, dataset_args, output_dir)
 
         # Set instance attributes
         self.model = self.model_args.model
