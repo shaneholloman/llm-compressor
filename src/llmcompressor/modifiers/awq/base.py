@@ -2,7 +2,7 @@ import inspect
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
-from compressed_tensors.quantization import disable_quantization
+from compressed_tensors.quantization import disable_quantization, forward_quantize
 from compressed_tensors.utils import (
     align_modules,
     get_execution_device,
@@ -531,6 +531,7 @@ class AWQModifier(Modifier, QuantizationMixin):
             for linear in linears2scale:
                 linear.weight.mul_(_scalesview)
                 call_observer(linear, "weight", linear.weight)  # assert is memoryless observer
+                linear.weight = forward_quantize(linear.weight)
                 linear.weight.div_(_scalesview)
 
             # W * X
